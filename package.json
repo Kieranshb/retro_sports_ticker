@@ -1,0 +1,24 @@
+{
+  "name": "sports_ticker",
+  "version": "1.0.0",
+  "description": "8-bit desktop sports ticker — always-on-top LED scoreboard",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build:logos": "node scripts/pixelate-logos.js"
+  },
+  "build": {
+    "appId": "com.you.ticker",
+    "win": { "target": "nsis" },
+    "mac": { "target": "dmg" },
+    "linux": { "target": "AppImage" }
+  },
+  "devDependencies": {
+    "electron": "^35.0.0",
+    "electron-builder": "^25.1.8",
+    "sharp": "^0.33.5"
+  },
+  "dependencies": {
+    "electron-store": "^10.0.0"
+  }
+}
