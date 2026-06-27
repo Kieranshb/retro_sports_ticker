@@ -51,6 +51,8 @@ function isSameLocalDay(isoDate, ref = new Date()) {
   );
 }
 
+const LOGO_PIXEL_SIZE = 16;
+
 function teamLogo(team) {
   const url = team.logo;
   const abbr = team.abbreviation || '?';
@@ -60,17 +62,7 @@ function teamLogo(team) {
   return `<img src="${url}" alt="" class="team-logo" crossorigin="anonymous" onerror="this.outerHTML='<span class=\\'team-abbr\\'>${abbr}</span>'">`;
 }
 
-function isLowContrastLogo(img) {
-  const canvas = document.createElement('canvas');
-  const w = img.naturalWidth || 32;
-  const h = img.naturalHeight || 32;
-  canvas.width = w;
-  canvas.height = h;
-
-  const ctx = canvas.getContext('2d');
-  ctx.drawImage(img, 0, 0, w, h);
-
-  const { data } = ctx.getImageData(0, 0, w, h);
+function isLowContrastImageData(data) {
   let visible = 0;
   let dark = 0;
 
@@ -84,19 +76,40 @@ function isLowContrastLogo(img) {
   return visible > 0 && dark / visible > 0.35;
 }
 
-function applyLogoContrastHints() {
-  document.querySelectorAll('.team-logo:not([data-contrast-checked])').forEach((img) => {
-    const check = () => {
-      img.dataset.contrastChecked = '1';
-      try {
-        if (isLowContrastLogo(img)) img.classList.add('low-contrast');
-      } catch {
-        img.classList.add('low-contrast');
-      }
-    };
+function pixelateLogo(img) {
+  if (img.dataset.pixelated === '1') return;
 
-    if (img.complete) check();
-    else img.addEventListener('load', check, { once: true });
+  const w = img.naturalWidth;
+  const h = img.naturalHeight;
+  if (!w || !h) return;
+
+  const size = LOGO_PIXEL_SIZE;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(img, 0, 0, size, size);
+
+  try {
+    const { data } = ctx.getImageData(0, 0, size, size);
+    if (isLowContrastImageData(data)) img.classList.add('low-contrast');
+    img.src = canvas.toDataURL('image/png');
+    img.dataset.pixelated = '1';
+    img.dataset.contrastChecked = '1';
+  } catch {
+    img.classList.add('low-contrast');
+    img.dataset.pixelated = '1';
+    img.dataset.contrastChecked = '1';
+  }
+}
+
+function processTeamLogos() {
+  document.querySelectorAll('.team-logo:not([data-pixelated])').forEach((img) => {
+    const run = () => pixelateLogo(img);
+    if (img.complete) run();
+    else img.addEventListener('load', run, { once: true });
   });
 }
 
@@ -118,14 +131,23 @@ function formatEvent(league, event) {
   const bases =
     league === 'mlb' && event.status.type.state === 'in' ? formatBases(comp.situation) : '';
 
-  return `${league.toUpperCase()}: ${teamLogo(away.team)} ${away.score} - ${home.score} ${teamLogo(home.team)}${bases} (${status})`;
+  const liveTag = isOngoing(event) ? '<span class="live-tag">LIVE</span> ' : '';
+  return `${liveTag}${league.toUpperCase()}: ${teamLogo(away.team)} ${away.score} - ${home.score} ${teamLogo(home.team)}${bases} (${status})`;
+}
+
+function scoreBlockClass(event) {
+  return isOngoing(event) ? 'score-block live' : 'score-block';
+}
+
+function isOngoing(event) {
+  return event.status.type.state === 'in';
 }
 
 function eventSortKey(event) {
   const today = isSameLocalDay(event.date);
   const state = event.status.type.state;
   const stateRank = STATE_PRIORITY[state] ?? 3;
-  return [today ? 0 : 1, stateRank, new Date(event.date).getTime()];
+  return [isOngoing(event) ? 0 : 1, today ? 0 : 1, stateRank, new Date(event.date).getTime()];
 }
 
 function compareEvents(a, b) {
@@ -141,7 +163,7 @@ function mergeEvents(...eventGroups) {
   const byId = new Map();
   for (const events of eventGroups) {
     for (const event of events) {
-      if (isWithinGameWindow(event.date)) {
+      if (isWithinGameWindow(event.date) || isOngoing(event)) {
         byId.set(event.id, event);
       }
     }
@@ -159,7 +181,10 @@ async function fetchScoreboard(url, dates) {
 
 async function fetchLeagueEvents(url) {
   const dateKeys = dateKeysInWindow();
-  const eventGroups = await Promise.all(dateKeys.map((key) => fetchScoreboard(url, key)));
+  const eventGroups = await Promise.all([
+    fetchScoreboard(url),
+    ...dateKeys.map((key) => fetchScoreboard(url, key)),
+  ]);
   return mergeEvents(...eventGroups);
 }
 
@@ -184,11 +209,11 @@ async function updateTicker() {
   const ticker = document.getElementById('ticker');
   ticker.innerHTML = items.length
     ? items
-        .map(({ league, event }) => `<span class="score-block">${formatEvent(league, event)}</span>`)
+        .map(({ league, event }) => `<span class="${scoreBlockClass(event)}">${formatEvent(league, event)}</span>`)
         .join('<span class="ticker-sep" aria-hidden="true"></span>')
     : 'NO GAMES IN RANGE';
 
-  applyLogoContrastHints();
+  processTeamLogos();
 }
 
 updateTicker();
